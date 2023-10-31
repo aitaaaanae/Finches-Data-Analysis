@@ -1,0 +1,654 @@
+---
+title: "Finches_EDA"
+output: html_document
+date: "2023-10-23"
+---
+
+```{r Read table, include=FALSE}
+# Load the required package
+library(readxl)
+
+# Provide the path to your Excel file
+finches_file <- "C:/Users/Aitana/Downloads/Finches_Dataset_Evolution.xls"
+
+# Read the Excel file
+finches_table <- read_excel(finches_file)
+```
+
+
+```{r Missing map plot, include=FALSE}
+
+library(Amelia)
+# Save the missmap as a PNG file
+png("missmap.png", width = 800, height = 800)
+
+# Create a missmap object from the table
+missmap <- missmap(finches_table)
+
+
+dev.off()
+
+
+```
+
+
+```{r cars}
+library(dplyr)
+
+# Replace spaces with periods in column names
+colnames(finches_table) <- gsub(" ", ".", colnames(finches_table))
+colnames(finches_table) <- gsub("\\(", ".", colnames(finches_table))
+colnames(finches_table) <- gsub("\\)", ".", colnames(finches_table))
+
+
+
+numeric_cols <- sapply(finches_table, is.numeric)
+finches_table_numeric <- select_if(finches_table, is.numeric)
+```
+
+# 1. Description of the dataset: 
+
+
+```{r cars}
+
+# Assuming finches_table_numeric is a data frame
+shapiro_results <- sapply(finches_table_numeric, function(col) {
+  if (is.numeric(col)) {
+    shat <- shapiro.test(col)
+    c(W = shat$statistic, p_value = shat$p.value)
+    
+  } else {
+    NA  # Non-numeric columns will have NA results
+  }
+})
+
+# Print the results
+print(shapiro_results)
+significance_level <- 0.05
+normally_distributed <- names(which(sapply(shapiro_results, function(x) x["p_value"]) > significance_level)) #If the p-value is less than 0.05 then 
+#the null hypotheses that the data is normally distributed is rejected. If p-value is > 0.05 then the null hypothesis is not rejected (its normally distributed)
+cat("Normally distributed variables: ", paste(normally_distributed, collapse = ", "))
+
+```
+
+
+```{r pressure, echo=FALSE}
+library(purrr)
+library(moments)
+library(gtsummary)
+library(ggplot2)
+library(jpeg)
+library(xtable)
+library(tidyverse)
+library(tidyr)
+library(forcats)
+
+
+#Descriptive summary of the data. 
+
+
+df1 <- finches_table_numeric %>% map_dbl(mean)
+df2 <- finches_table_numeric %>% map_dbl(median)
+df3 <- finches_table_numeric %>% map_dbl(sd)
+df4 <- finches_table_numeric %>% map_dbl(kurtosis)
+df5 <- finches_table_numeric %>% map_dbl(skewness)
+df6 <- finches_table_numeric %>% map_dbl(min)
+df7 <- finches_table_numeric %>% map_dbl(max)
+
+params <- rbind(df1, df2, df3, df4, df5, df6, df7)
+rownames(params) <- c("Mean", "Median", "Sd", "Kurtosis", "Skewness", "Min", "Max")
+params <- t(params)
+params
+
+
+new_tbl_numeric <- finches_table %>%
+select(Weight..g., Wing..mm., Tarsus..mm., Beak.Length..mm., Beak.Depth..mm., Beak.Width..mm.)
+
+
+new_tbl_categorical <- finches_table %>%
+select(Sex, First.adult.year, Last.Year,Sex, Species)
+#tbl_num <- tbl_summary(new_tbl_numeric, everything ~ "mean_sd")
+#print(tbl_num)
+
+
+tbl_num <- new_tbl_numeric %>%
+  tbl_summary(
+   
+    statistic = list(
+      "Weight..g." ~ "{median} ({IQR})",
+      "Wing..mm." ~ "{median} ({IQR})", 
+      "Tarsus..mm." ~ "{mean} ({sd})", 
+      "Beak.Width..mm." ~ "{mean} ({sd})",
+      "Beak.Depth..mm." ~ "{mean} ({sd})",
+      "Beak.Length..mm." ~ "{mean} ({sd})"
+    )
+  )%>%
+  as_gt() %>%
+  gt::as_latex() %>%
+  writeLines(con = "descriptive_summary_numeric.tex")
+
+
+
+tbl_cat <- tbl_summary(new_tbl_categorical) %>%
+  as_gt() %>%
+  gt::as_latex() %>%
+  writeLines(con = "descriptive_summary_cat.tex")
+```
+
+```{r Plot distributions of cat and numeric variables, echo=FALSE}
+
+
+
+finches_table$Sex <- fct_collapse(
+  as.factor(finches_table$Sex),
+  male = "male",
+  female = "female",
+  unknown = "unknown"
+)
+
+```
+
+```{r Save categorical variable descriptive plots in png files, echo=FALSE}
+
+library(gridExtra)
+library(ggpubr)
+library(vcd)
+
+
+
+# Create individual plots for each variable with a single fill color
+fill_color <- "#69b3a2"  # Specify the fill color here
+
+plot1 <- ggplot(new_tbl_categorical, aes(x = Sex)) +
+  geom_bar(fill = fill_color) +
+  labs(title = "Sex")
+
+plot2 <- ggplot(new_tbl_categorical, aes(x = First.adult.year)) +
+  geom_bar(fill = fill_color) +
+  labs(title = "First Year")
+
+plot3 <- ggplot(new_tbl_categorical, aes(x = Last.Year)) +
+  geom_bar(fill = fill_color) +
+  labs(title = "Last Year")
+
+new_tbl_categorical$survivor <- ifelse(new_tbl_categorical$Last.Year > 1977, "Survived", "Did not survive")
+plot4 <- ggplot(new_tbl_categorical, aes(x = survivor)) +
+  geom_bar(fill = fill_color) +
+  labs(title = "Survivor")
+
+# Arrange the plots in a 2x2 grid
+grid_plot <- grid.arrange(plot1, plot2, plot3, plot4, ncol = 2)
+
+# Save the entire grid as an image (e.g., "plots.png")
+ggsave("plots.png", grid_plot, width = 8, height = 6, units = "in")
+
+```
+
+```{r Save numeric descriptive plots to png, fig.width=6, fig.height=5, out.width='600px' }
+
+p <- new_tbl_numeric %>% pivot_longer(everything(), names_to = "cols", values_to = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins=20,fill="#69b3a2", color="#e9ecef") +
+  facet_wrap(~ cols, ncol=3, scales = 'free', ) + 
+  labs(title="Continuous variable distribution", x="Value", y="Nº of observations")
+
+
+ggsave("numeric_distributions.png", p)
+```
+
+
+
+
+```{r cont dist29, fig.width=7, fig.height=7, out.width='600px' }
+
+
+p <- new_tbl_numeric %>%
+  pivot_longer(everything(),names_to="cols",values_to="value")%>%
+  ggplot(aes(y = value)) +
+  geom_boxplot(outlier.colour="red",
+  outlier.shape=19,
+  outlier.size=1.5, 
+  fill="#86ebd0",
+  outlier.alpha = 0.3)+
+  facet_wrap(~ cols, ncol=4, scales = 'free')
+
+ggsave("boxplots.png", p)
+```
+
+2. Correlation between morphological variables: 
+
+```{r correl scatter, fig.width=7, fig.height=7, out.width='6500px'}
+pdf("pairs_plot.pdf", width = 8, height = 8)
+png("pairs.png", width = 800, height = 800)
+
+pairs(new_tbl_numeric[, !colnames(new_tbl_numeric) %in% "survivor"], pch = 16, col = "#69b3a2", cex = 0.3)
+
+# Save the plot as a PDF file
+
+# The plot is automatically saved when you close the device
+```
+
+
+Correlation matrix: 
+```{r}
+library(rstatix)
+cor.mat <- new_tbl_numeric %>% cor_mat(-survivor)
+cor.mat %>% cor_get_pval()
+
+png("corr_plot_pval.png", width = 800, height = 800)
+
+cor.mat %>%
+  cor_reorder() %>%
+  pull_lower_triangle() %>%
+  cor_plot(label = TRUE)
+cor.mat %>% cor_gather()
+
+```
+
+
+- Weight (g) and Wing (mm): 0.648
+- Weight (g) and Beak Length (mm): 0.851
+- Weight (g) and Beak Depth (mm): 0.731
+- Weight (g) and Beak Width (mm): 0.768
+- Wing (mm) and Beak Length (mm): 0.780
+- Wing (mm) and Beak Depth (mm): 0.648
+- Wing (mm) and Beak Width (mm): 0.605
+- Beak Length (mm) and Beak Depth (mm): 0.851
+- Beak Length (mm) and Beak Width (mm): 0.744
+- Beak Depth (mm) and Beak Width (mm): 0.878
+
+
+###For the first hypothesis, we seek to study the relationship between survival status and different morphological characteristics related to the beak: 
+
+```{r exper8, fig.width=3, fig.height=3, out.width='300px'}
+library(ggplot2)
+library(ggthemes)
+library(ggpubr) 
+library(cowplot)
+
+finches_table_numeric$survivor <- ifelse(finches_table_numeric$Last.Year > 1977, "Survived", "Did not survive")
+finches_table_numeric$Beak.Size <- with(finches_table_numeric, Beak.Depth..mm. * Beak.Length..mm. * Beak.Width..mm.)
+
+# Create density plots for continuous variables against 'Survivor'
+continuous_vars <- colnames(finches_table_numeric)[c(4:9, 11)]
+# Set a custom color palette
+my_colors <- c("Survived" = "skyblue", "Did not survive" = "orange")
+
+# Create a PDF device to save the plots
+```
+
+
+```{r SAVE BIVARIATE PLOTS TO PDF, fig.width=3, fig.height=3, out.width='300px'}
+pdf("density_box_plots.pdf", width = 10, height = 8)
+
+for (var in continuous_vars) {
+  # Create density plot
+  density_plot <- ggplot(finches_table_numeric, aes(x = .data[[var]], fill = survivor)) +
+    geom_density(alpha = 0.6) +
+    labs(title = paste("Density Plot of", var, "vs. Survivor")) +
+    scale_fill_manual(values = my_colors) +
+    theme_minimal() +
+    theme(legend.position = "top")
+  
+  # Create box plot
+  box_plot <- ggplot(finches_table_numeric, aes(x = survivor, y = .data[[var]], fill = survivor)) +
+    geom_boxplot() +
+    labs(title = paste("Box Plot of", var, "vs. Survivor")) +
+    scale_fill_manual(values = my_colors) +
+    theme_minimal() +
+    theme(legend.position = "top")
+  
+  # Arrange density and box plots side by side
+  plot_arranged <- plot_grid(density_plot, box_plot, ncol = 2)
+  
+  # Print the arranged plot
+  print(plot_arranged)
+}
+
+# Close the PDF device
+dev.off()
+
+
+```
+
+
+
+
+
+
+
+
+
+```{r SAVE BIVARIATE PLOTS TO PNG FILES}
+
+# Create a directory to save the PNG files
+dir.create("density_box_plots")
+
+# Set the custom color palette
+my_colors <- c("Survived" = "skyblue", "Did not survive" = "orange")
+
+for (var in continuous_vars) {
+  # Create density plot
+  density_plot <- ggplot(finches_table_numeric, aes(x = .data[[var]], fill = survivor)) +
+    geom_density(alpha = 0.6) +
+    labs(title = paste("Density Plot of", var, "vs. Survivor")) +
+    scale_fill_manual(values = my_colors) +
+    theme_minimal() +
+    theme(legend.position = "top")
+  
+  # Create box plot
+  box_plot <- ggplot(finches_table_numeric, aes(x = survivor, y = .data[[var]], fill = survivor)) +
+    geom_boxplot() +
+    labs(title = paste("Box Plot of", var, "vs. Survivor")) +
+    scale_fill_manual(values = my_colors) +
+    theme_minimal() +
+    theme(legend.position = "top")
+  
+  # Arrange density and box plots side by side
+  plot_arranged <- plot_grid(density_plot, box_plot, ncol = 2)
+  
+  # Save the plot as a PNG file
+  ggsave(filename = paste("density_box_plots/", var, ".png", sep = ""), plot = plot_arranged, width = 10, height = 8)
+}
+
+
+
+```
+
+```{r}
+finches_table_numeric %>%
+  select("Beak.Width..mm.", "Beak.Depth..mm.", "Beak.Length..mm.", "Beak.Size", "survivor") %>%
+  tbl_summary(
+    by = survivor,
+    statistic = list(
+      "Beak.Width..mm." ~ "{mean} ({sd})",
+      "Beak.Depth..mm." ~ "{mean} ({sd})",
+      "Beak.Length..mm." ~ "{mean} ({sd})",
+      "Beak.Size" ~ "{median} ({IQR})"
+    )
+  ) %>%
+  add_p(
+    test = list(
+      "Beak.Width..mm." ~ "t.test",
+      "Beak.Depth..mm." ~ "t.test",
+      "Beak.Length..mm." ~ "t.test",
+      "Beak.Size" ~ "wilcox.test"
+    ),
+    pvalue_fun = function(x) style_number(x, digits = 3)
+  ) %>% as_gt() %>%
+  gt::as_latex() %>% writeLines(con = "latex_out_pvals_beaks_natural_selec.tex")
+
+```
+
+
+```{r SAVE BIVARIATE SUMMARY TABLE TO LATEX (morphological)}
+finches_table_numeric %>%
+  select("Weight..g.", "Wing..mm.", "Tarsus..mm.", "survivor") %>%
+  tbl_summary(
+    by = survivor,
+    statistic = list(
+      "Weight..g." ~ "{median} ({IQR})", 
+      "Wing..mm." ~ "{median} ({IQR})", 
+      "Tarsus..mm." ~ "{mean} ({sd})"
+    )
+  ) %>%
+  add_p(
+    test = list(
+      "Weight..g." ~ "wilcox.test", 
+      "Wing..mm." ~ "wilcox.test", 
+      "Tarsus..mm." ~ "t.test"
+    ),
+    pvalue_fun = function(x) style_number(x, digits = 3)
+  ) %>% as_gt() %>%
+  gt::as_latex() %>% writeLines(con = "pvals_morf_seleccion_natural.tex")
+
+
+```
+
+
+
+## 2. There is sexual dimorphism after the drought: 
+
+
+
+```{r Saphiro for survivors to the drougth to test normality in the new sample (reduced sample)}
+
+# Assuming finches_table_numeric is a data frame
+shapiro_results <- sapply(finches_table_numeric[finches_table_numeric$survivor == "Survived",], function(col) {
+  if (is.numeric(col)) {
+    shat <- shapiro.test(col)
+    c(W = shat$statistic, p_value = shat$p.value)
+    
+  } else {
+    NA  # Non-numeric columns will have NA results
+  }
+})
+
+# Print the results
+print(shapiro_results)
+significance_level <- 0.05
+normally_distributed <- names(which(sapply(shapiro_results, function(x) x["p_value"]) > significance_level)) #If the p-value is less than 0.05 then 
+#the null hypotheses that the data is normally distributed is rejected. If p-value is > 0.05 then the null hypothesis is not rejected (its normally distributed)
+cat("Normally distributed variables: ", paste(normally_distributed, collapse = ", "))
+
+
+```
+
+
+
+```{r IS SURVIVAL AFFECTED AT ALL BY SEX?}
+
+finches_table_numeric$Sex <- finches_table$Sex
+filtered_data <- finches_table_numeric[finches_table_numeric$Sex %in% c("male", "female"), ]
+
+
+ggsave("bar_plot_surv_sex.png", bar_plot, width = 6, height = 4)
+bar_plot <- ggplot(filtered_data, aes(x = Sex, fill = survivor)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Survivor by Sex") +
+  scale_fill_manual(values = c("Survived" = "skyblue", "Did not survive" = "orange")) +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+# Print the bar plot
+print(bar_plot)
+
+# Create a table summary
+table_summary <-  filtered_data %>% select("Sex", "survivor") %>% tbl_summary(by = Sex) %>%
+  add_p() %>%
+    as_gt() %>%
+  gt::as_latex() %>%
+  writeLines(con = "latex_out_sexo_drought.tex")
+
+print(table_summary)
+```
+
+
+
+
+
+```{r OBSERVE THE CHANGE BEFORE - AFTER THE DROUGHT IN FEMALES AND MALES }
+
+males <- finches_table_numeric[finches_table_numeric$Sex == "male", ]
+females <- finches_table_numeric[finches_table_numeric$Sex == "female", ]
+
+# Set the size of the boxplots
+par(mfrow = c(2, 1), mar = c(5, 5, 4, 2))
+
+# Create a directory to save PNG files
+dir.create("boxplots", showWarnings = FALSE)
+
+# Boxplot for beak depth in males comparing survivors and non-survivors
+png("boxplots/male_beak_depth.png", width = 800, height = 600)
+boxplot(Beak.Depth..mm. ~ survivor, data = males, 
+      
+        main = "Beak Depth in Males",
+        col = c("orange", "lightblue"))
+dev.off()
+
+# Boxplot for beak depth in females comparing survivors and non-survivors
+png("boxplots/female_beak_depth.png", width = 800, height = 600)
+boxplot(Beak.Depth..mm. ~ survivor, data = females, 
+  
+        main = "Beak Depth in Females",
+        col = c("orange", "lightblue"))
+dev.off()
+
+
+
+```
+
+
+
+```{r PLOT DIFFERENCES BETWEEN MALES AND FEMALES AFTER THE DROUGHT}
+# Define the output directory for PNG files
+output_dir <- "sex_bivariate"
+
+# Create the output directory if it doesn't exist
+dir.create(output_dir, showWarnings = FALSE)
+
+# Set the working directory to the output directory
+setwd(output_dir)
+
+finches_table_numeric_surv <- finches_table_numeric[finches_table_numeric$survivor == "Survived" & finches_table_numeric$Sex != "unknown", ]
+
+# Define the file extension (e.g., "png")
+file_extension <- "png"
+
+# Define custom color palette
+my_colors <- c("male" = "steelblue", "female" = "salmon")
+
+# Loop through the variables and save plots as PNG files
+for (var in continuous_vars) {
+  # Create density plot
+  density_plot <- ggplot(finches_table_numeric_surv, aes(x = .data[[var]], fill = Sex)) +
+    geom_density(alpha = 0.6) +
+    labs(title = paste("Density Plot of", var, "vs. Sex")) +
+    scale_fill_manual(values = my_colors) +
+    theme_minimal() +
+    theme(legend.position = "top")
+  
+  # Create box plot
+  box_plot <- ggplot(finches_table_numeric_surv, aes(x = Sex, y = .data[[var]], fill = Sex)) +
+    geom_boxplot() +
+    labs(title = paste("Box Plot of", var, "vs. Sex")) +
+    scale_fill_manual(values = my_colors) +
+    theme_minimal() +
+    theme(legend.position = "top")
+  
+  # Arrange density and box plots side by side
+  plot_arranged <- plot_grid(density_plot, box_plot, ncol = 2)
+  
+  # Define the file name and path
+  file_name <- paste(var, "vs_Sex_surv", file_extension, sep = ".")
+  
+  # Save the plot as a PNG file
+  ggsave(filename = file_name, plot = plot_arranged, width = 10, height = 8, device = file_extension)
+}
+
+# Reset the working directory to its original location
+setwd("C:/Users/Aitana/OneDrive")
+```
+
+
+```{r}
+
+finches_table_numeric[finches_table_numeric$Sex %in% c("male", "female") & finches_table_numeric$survivor == "Survived", ] %>%
+  select("Weight..g.", "Wing..mm.", "Tarsus..mm.", "Beak.Width..mm.", "Beak.Depth..mm.", "Beak.Length..mm.", "Sex") %>%
+  tbl_summary(
+    by = Sex,
+    statistic = list(
+      "Weight..g." ~ "{median} ({IQR})", 
+      "Wing..mm." ~ "{mean} ({sd})", 
+      "Tarsus..mm." ~ "{mean} ({sd})", 
+      "Beak.Width..mm." ~ "{mean} ({sd})",
+      "Beak.Depth..mm." ~ "{mean} ({sd})",
+      "Beak.Length..mm." ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} / {N} ({p}%)"
+    )
+  ) %>%
+  add_p(
+    test = list(
+      "Weight..g." ~ "wilcox.test", 
+      "Wing..mm." ~ "t.test", 
+      "Tarsus..mm." ~ "t.test", 
+      "Beak.Width..mm." ~ "t.test",
+      "Beak.Depth..mm." ~ "t.test",
+      "Beak.Length..mm." ~ "t.test"
+    ),
+    pvalue_fun = function(x) style_number(x, digits = 3)
+  ) %>%
+  as_gt() %>%
+  gt::as_latex() %>%
+  writeLines(con = "latex_out_pvals_dimorfismo_sexual_survived.tex")
+
+
+```
+
+
+```{r , fig.width=3, fig.height=3, out.width='300px}
+# Create a PDF device to save the plots
+pdf("density_box_plots_sex.pdf", width = 10, height = 8)
+
+# Define custom color palette
+my_colors <- c("male" = "steelblue", "female" = "salmon", "unknown" = "gray")
+
+for (var in continuous_vars) {
+  # Create density plot
+  density_plot <- ggplot(finches_table_numeric, aes(x = .data[[var]], fill = Sex)) +
+    geom_density(alpha = 0.6) +
+    labs(title = paste("Density Plot of", var, "vs. Sex")) +
+```
+
+
+```{r exper8, fig.width=3, fig.height=3, out.width='300px}
+scale_fill_manual(values = my_colors) +
+    theme_minimal() +
+    theme(legend.position = "top")
+  
+  # Create box plot
+  box_plot <- ggplot(finches_table_numeric, aes(x = Sex, y = .data[[var]], fill = Sex)) +
+    geom_boxplot() +
+    labs(title = paste("Box Plot of", var, "vs. Sex")) +
+    scale_fill_manual(values = my_colors) +
+    theme_minimal() +
+    theme(legend.position = "top")
+  
+  # Arrange density and box plots side by side
+  plot_arranged <- plot_grid(density_plot, box_plot, ncol = 2)
+  
+  # Print the arranged plot
+  print(plot_arranged)
+}
+
+# Close the PDF device
+dev.off()
+```
+
+
+
+
+
+
+
+
+#Extra hypotheses: not included in the report--> age of the finches at the moment of the drought affected their survival?
+```{r exper8, fig.width=3, fig.height=3, out.width='300px}
+
+
+summary_table <- tbl_summary(data,
+  by = survivor,
+  statistic = list(
+    age_at_drought ~ "{mean} ({sd})"
+  ),
+  type = list(age_at_drought ~ "continuous")
+)
+
+# Add p-values based on the Wilcoxon test
+summary_table <- summary_table %>%
+  add_p()
+
+# Print the summary table
+summary_table
+
+```
